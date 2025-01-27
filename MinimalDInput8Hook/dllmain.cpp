@@ -13,6 +13,9 @@
 #include <optional>
 #include <cassert>
 
+#include <filesystem>
+#include <iostream>
+
 struct ThreadData {
 	HMODULE hModule;
 };
@@ -106,8 +109,7 @@ private:
 
 std::optional<STDWSTRING> GetModulePath(HMODULE hModule) {
     WCHAR wcModuleFilename[MAX_PATH + 1];
-    const DWORD szModuleFilename = GetModuleFileName(
-        hModule, wcModuleFilename, MAX_PATH);
+    const DWORD szModuleFilename = GetModuleFileName(hModule, wcModuleFilename, MAX_PATH);
     if (szModuleFilename == 0) {
         return std::nullopt;
     }
@@ -116,13 +118,10 @@ std::optional<STDWSTRING> GetModulePath(HMODULE hModule) {
     return { STDWSTRING { moduleFilename.substr(0, lastSlash + 1) } };
 }
 
-std::optional<FileData> WriteDataToFile(
-    const STDWSTRING& modulePath, LPVOID pExe, DWORD szExe,
-    const std::optional<STDWSTRING>& filename, BOOL eraseOnClose) {
+std::optional<FileData> WriteDataToFile(const STDWSTRING& modulePath, LPVOID pExe, DWORD szExe, const std::optional<STDWSTRING>& filename, BOOL eraseOnClose) {
     WCHAR tempFile[MAX_PATH + 1];
     if (!filename) {
-        const UINT uUnique = GetTempFileName(
-            modulePath.c_str(), L"fps", 0, tempFile);
+        const UINT uUnique = GetTempFileName(modulePath.c_str(), L"FLS", 0, tempFile);
         if (uUnique == 0) {
             return std::nullopt;
         }
@@ -154,10 +153,7 @@ std::optional<FileData> WriteDataToFile(
     return FileData{ std::move(hFileRead), std::move(tempFile), eraseOnClose };
 }
 
-std::optional<FileData> WriteResourceToFile(
-    HMODULE hModule, const STDWSTRING& modulePath, int resourceIndex,
-    std::optional<STDWSTRING> filename = std::nullopt,
-    BOOL eraseOnClose = TRUE) {
+std::optional<FileData> WriteResourceToFile(HMODULE hModule, const STDWSTRING& modulePath, int resourceIndex, std::optional<STDWSTRING> filename = std::nullopt, BOOL eraseOnClose = TRUE) {
     const HRSRC hRes = FindResource(
         hModule, MAKEINTRESOURCE(resourceIndex), RT_RCDATA);
     if (!hRes) {
@@ -175,8 +171,7 @@ std::optional<FileData> WriteResourceToFile(
     if (!pData) {
         return std::nullopt;
     }
-    return { WriteDataToFile(
-            modulePath, pData, szData, filename, eraseOnClose) };
+    return { WriteDataToFile(modulePath, pData, szData, filename, eraseOnClose) };
 }
 
 DWORD ExecuteAndWaitForExe(const FileData&& exeData) {
@@ -256,16 +251,32 @@ int Init(HMODULE hModule)
 
 	DisableThreadLibraryCalls(hModule);
 	ThreadData* const pData = new ThreadData{ hModule };
-	const HANDLE hThread = CreateThread(
-		NULL, 0, ThreadProc, pData, 0, NULL /*lpThreadId*/);
+	const HANDLE hThread = CreateThread(NULL, 0, ThreadProc, pData, 0, NULL /*lpThreadId*/);
 	if (!hThread) {
 		return FALSE;
 	}
 }
 
-BOOL APIENTRY DllMain(HMODULE Module,
-	DWORD  ReasonForCall,
-	LPVOID Reserved)
+/*
+    Cleanup for tmp file not deleted
+*/
+bool CleanupFastLoadingTmpFiles(const STDWSTRING& modulePath) {
+    for (const auto& entry : std::filesystem::directory_iterator(modulePath.c_str())) {
+        if (entry.is_regular_file()) {
+            const auto& filename = entry.path().filename().wstring();
+            if (filename.find(L"FLS") == 0) { // Match prefix
+                if (!DeleteFile(entry.path().c_str())) {
+                    // Handle case where file cannot be deleted
+                    DWORD error = GetLastError();
+                    std::wcerr << L"Failed to delete file: " << entry.path().c_str()
+                        << L" (Error code: " << error << L")\n";
+                }
+            }
+        }
+    }
+}
+
+BOOL APIENTRY DllMain(HMODULE Module, DWORD  ReasonForCall, LPVOID Reserved)
 {
 	switch (ReasonForCall)
 	{
@@ -275,6 +286,10 @@ BOOL APIENTRY DllMain(HMODULE Module,
 	case DLL_THREAD_ATTACH:
 	case DLL_THREAD_DETACH:
 	case DLL_PROCESS_DETACH:
+        auto&& modulePath{ GetModulePath(Module) };
+        if (modulePath) {
+            CleanupFastLoadingTmpFiles(*modulePath);
+        }
 		break;
 	}
 	return TRUE;
