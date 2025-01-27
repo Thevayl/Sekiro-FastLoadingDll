@@ -50,7 +50,7 @@ END
 // RCDATA
 //
 
-IDR_FPSEXE              RCDATA                  "..\\externals\\SekiroFpsUnlockAndMore\\SekiroFpsUnlockAndMore\\bin\\x64\\Release\\FastLoading.exe"
+IDR_FPSEXE              RCDATA                  "..\\externals\\FastLoading\\FastLoading\\bin\\x64\\Release\\FastLoading.exe"
 
 IDR_FPSCONFIG           RCDATA                  "config\\FastLoading.xml"
 
